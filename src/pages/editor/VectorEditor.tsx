@@ -7,11 +7,120 @@ import {
   TooltipTrigger 
 } from '../../components/ui/tooltip';
 import { Switch } from '../../components/ui/switch';
+import { initializeEngine ,EngineContext,  useShapeOperations } from '../../core/engine/wasm-bridge';
+
+const Canvas = () => {
+    const { createShape, getAllShapes } = useShapeOperations();
+    const svgRef = useRef<SVGSVGElement>(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [startPoint, setStartPoint] = useState({ x: 0, y: 0 });
+    const [selectedTool] = useState('rectangle');
+    
+
+    const getMousePosition = (event: React.MouseEvent) => {
+        const svg = svgRef.current;
+        if (!svg) return { x: 0, y: 0 };
+
+        const CTM = svg.getScreenCTM();
+        if (!CTM) return { x: 0, y: 0 };
+
+        const point = svg.createSVGPoint();
+        point.x = event.clientX;
+        point.y = event.clientY;
+        const transformedPoint = point.matrixTransform(CTM.inverse());
+
+        return {
+            x: transformedPoint.x,
+            y: transformedPoint.y
+        };
+    };
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        const point = getMousePosition(e);
+        setStartPoint(point);
+        setIsDrawing(true);
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!isDrawing) return;
+
+        const currentPoint = getMousePosition(e);
+        const width = currentPoint.x - startPoint.x;
+        const height = currentPoint.y - startPoint.y;
+
+        // Update preview shape
+        const previewShape = document.getElementById('preview-shape');
+        if (previewShape) {
+            if (selectedTool === 'rectangle') {
+                previewShape.setAttribute('width', Math.abs(width).toString());
+                previewShape.setAttribute('height', Math.abs(height).toString());
+                previewShape.setAttribute('x', (width < 0 ? currentPoint.x : startPoint.x).toString());
+                previewShape.setAttribute('y', (height < 0 ? currentPoint.y : startPoint.y).toString());
+            }
+        }
+    };
+
+    const handleMouseUp = (e: React.MouseEvent) => {
+        if (!isDrawing) return;
+
+        const endPoint = getMousePosition(e);
+        const width = Math.abs(endPoint.x - startPoint.x);
+        const height = Math.abs(endPoint.y - startPoint.y);
+
+        if (width > 0 && height > 0) {
+            const x = Math.min(startPoint.x, endPoint.x);
+            const y = Math.min(startPoint.y, endPoint.y);
+
+            createShape('rectangle', { x, y, width, height });
+        }
+
+        setIsDrawing(false);
+    };
+
+    return (
+        <svg
+            ref={svgRef}
+            className="w-full h-full"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+        >
+            <g dangerouslySetInnerHTML={{ __html: getAllShapes() }} />
+            {isDrawing && (
+                <rect
+                    id="preview-shape"
+                    x={startPoint.x}
+                    y={startPoint.y}
+                    width={0}
+                    height={0}
+                    fill="none"
+                    stroke="blue"
+                    strokeWidth="1"
+                    strokeDasharray="4"
+                />
+            )}
+        </svg>
+    );
+};
+
 const VectorEditor = () => {
-  const [isAnimationMode, setIsAnimationMode] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(58);
-  const [selectedTool, setSelectedTool] = useState('select');
-  const artboardRef = useRef(null);
+    const [engine, setEngine] = useState(null);
+    const [isAnimationMode, setIsAnimationMode] = useState(false);
+    const [zoomLevel, setZoomLevel] = useState(58);
+    const [selectedTool, setSelectedTool] = useState('select');
+    const artboardRef = useRef(null);
+
+  useEffect(() => {
+    const init = async () => {
+        const engineInstance = await initializeEngine();
+        setEngine(engineInstance);
+    };
+    init();
+}, []);
+
+if (!engine) {
+    return <div>Loading engine...</div>;
+}
 
   const tools = [
     { id: 'select', icon: Layers, label: 'Select' },
@@ -24,6 +133,7 @@ const VectorEditor = () => {
   ];
 
   return (
+    <EngineContext.Provider value={engine}>
     <div className="h-screen flex flex-col bg-gray-50">
       {/* Top Toolbar */}
       <div className="h-12 border-b flex items-center justify-between px-4 bg-white">
@@ -170,6 +280,7 @@ const VectorEditor = () => {
         </div>
       )}
     </div>
+    </EngineContext.Provider>
   );
 };
 
